@@ -23,6 +23,7 @@ sale_product = Table(
     Column('quantity', Integer)
 )
 
+
 class Product(Base):
     __tablename__ = 'products'
 
@@ -89,5 +90,5 @@ class Sale(Base):
     
     
     employee = relationship("Employee", back_populates="sales")
-    card = relationship("Card")
+    card = relationship("Card"),
     products = relationship("Product", secondary=sale_product)

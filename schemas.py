@@ -21,7 +21,7 @@ class ProductResponse(ProductBase):
     id: int
     
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 # Card schemas
 class CardBase(BaseModel):
@@ -35,7 +35,7 @@ class CardResponse(CardBase):
     is_active: bool
     
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 class CardProductBase(BaseModel):
     product_id: int
@@ -49,7 +49,7 @@ class CardProductResponse(CardProductBase):
     product: ProductResponse
     
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 # Employee schemas
 class EmployeeBase(BaseModel):
@@ -59,11 +59,10 @@ class EmployeeBase(BaseModel):
 class EmployeeCreate(EmployeeBase):
     pass
 
-class EmployeeResponse(EmployeeBase):
+class EmployeeResponse(BaseModel):
     id: int
-    
-    class Config:
-        from_attributes = True
+    name: str
+    role: str
 
 # Supplier schemas
 class SupplierBase(BaseModel):
@@ -78,28 +77,19 @@ class SupplierResponse(SupplierBase):
     products: List[ProductResponse] = []
     
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 # Sale schemas
-class SaleBase(BaseModel):
+class SaleCreate(BaseModel):
     employee_id: int
     card_id: int
-    products: List[CardProductBase] = []
-
-class SaleCreate(SaleBase):
-    pass
-
-class SaleProductResponse(BaseModel):
-    product_id: int
-    name: str
-    price: float
-    quantity: int
+    products: List[dict]  # A list of product dictionaries containing product_id and quantity
 
 class SaleResponse(BaseModel):
     id: int
     total: float
     employee: EmployeeResponse
-    products: List[SaleProductResponse]
-    
+    products: List[ProductResponse]
+
     class Config:
-        from_attributes = True
+        orm_mode = True
