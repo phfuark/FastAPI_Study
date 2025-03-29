@@ -1,9 +1,10 @@
 from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy.orm import Session,sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import Table  # Ensure Table is imported
 import uvicorn
 from typing import List
 
-from models import Base, Product, Card, Employee, Supplier, Sale, CardProduct, engine
+from models import Base, Product, Card, Employee, Supplier, Sale, CardProduct, engine, sale_product  # Import sale_product
 from schemas import (
     ProductCreate, ProductResponse, ProductUpdate,
     CardCreate, CardResponse, CardProductCreate, CardProductResponse,
@@ -13,7 +14,6 @@ from schemas import (
 )
 
 app = FastAPI()
-
 
 Base.metadata.create_all(bind=engine)
 
@@ -26,12 +26,11 @@ def get_db():
     finally:
         db.close()
 
-
 @app.get('/')
 def hello_world():
     return {'message': 'E-Commerce System API'}
 
-
+# Product Routes
 @app.post('/products/', response_model=ProductResponse)
 def create_product(product: ProductCreate, db: Session = Depends(get_db)):
     db_product = Product(**product.model_dump())
@@ -65,7 +64,7 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
     db.refresh(db_product)
     return db_product
 
-
+# Card Routes
 @app.post('/cards/', response_model=CardResponse)
 def create_card(card: CardCreate, db: Session = Depends(get_db)):
     db_card = Card(**card.model_dump())
@@ -91,16 +90,13 @@ def add_product_to_card(
     card_product: CardProductCreate, 
     db: Session = Depends(get_db)
 ):
-    
     card = db.query(Card).filter(Card.id == card_id).first()
     if card is None:
         raise HTTPException(status_code=404, detail="Card not found")
     
-    
     product = db.query(Product).filter(Product.id == card_product.product_id).first()
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    
     
     existing_item = db.query(CardProduct).filter(
         CardProduct.card_id == card_id,
@@ -108,10 +104,8 @@ def add_product_to_card(
     ).first()
     
     if existing_item:
-        
         existing_item.quantity += card_product.quantity
     else:
-        
         existing_item = CardProduct(
             card_id=card_id,
             product_id=card_product.product_id,
@@ -123,7 +117,7 @@ def add_product_to_card(
     db.refresh(existing_item)
     return existing_item
 
-
+# Employee Routes
 @app.post('/employees/', response_model=EmployeeResponse)
 def create_employee(employee: EmployeeCreate, db: Session = Depends(get_db)):
     db_employee = Employee(**employee.model_dump())
@@ -136,14 +130,13 @@ def create_employee(employee: EmployeeCreate, db: Session = Depends(get_db)):
 def read_employees(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     return db.query(Employee).offset(skip).limit(limit).all()
 
-
+# Supplier Routes
 @app.post('/suppliers/', response_model=SupplierResponse)
 def create_supplier(supplier: SupplierCreate, db: Session = Depends(get_db)):
     db_supplier = Supplier(name=supplier.name)
     db.add(db_supplier)
     db.commit()
     db.refresh(db_supplier)
-    
     
     for product_id in supplier.product_ids:
         product = db.query(Product).filter(Product.id == product_id).first()
@@ -158,34 +151,51 @@ def read_suppliers(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)
     suppliers = db.query(Supplier).offset(skip).limit(limit).all()
     return suppliers
 
+# Sale Routes
+@app.post("/sales/", response_model=SaleResponse)
+def create_sale(sale_data: dict, db: Session = Depends(get_db)):
+    try:
+        # Verifica se o funcionário e o cartão existem
+        employee = db.query(Employee).filter(Employee.id == sale_data["employee_id"]).first()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
 
-@app.post('/sales/', response_model=SaleResponse)
-def create_sale(sale: SaleCreate, db: Session = Depends(get_db)):
-    
-    employee = db.query(Employee).filter(Employee.id == sale.employee_id).first()
-    if employee is None:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    
-    card = db.query(Card).filter(Card.id == sale.card_id).first()
-    if card is None:
-        raise HTTPException(status_code=404, detail="Card not found")
-    
-    
-    card_products = db.query(CardProduct).filter(CardProduct.card_id == sale.card_id).all()
-    if not card_products:
-        raise HTTPException(status_code=400, detail="Card is empty")
-    
-    
-    total = 0.0
-    sale_products = []
-    
-    for cp in card_products:
-        product = db.query(Product).filter(Product.id == cp.product_id).first()
-        if product.quantity < cp.quantity:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Not enough stock for product {product.name}"
-            )
-        
-        total += product.price
+        card = db.query(Card).filter(Card.id == sale_data["card_id"]).first()
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+
+        # Cria a venda
+        new_sale = Sale(employee_id=sale_data["employee_id"], card_id=sale_data["card_id"], total=0.0)
+        db.add(new_sale)
+        db.commit()
+        db.refresh(new_sale)
+
+        total = 0.0
+
+        # Associa os produtos à venda
+        for item in sale_data.get("products", []):
+            product = db.query(Product).filter(Product.id == item["product_id"]).first()
+            if not product:
+                raise HTTPException(status_code=404, detail=f"Product with ID {item['product_id']} not found")
+
+            # Atualiza estoque
+            if product.quantity < item["quantity"]:
+                raise HTTPException(status_code=400, detail=f"Not enough stock for product {product.id}")
+
+            product.quantity -= item["quantity"]
+            total += product.price * item["quantity"]
+
+            # Insere na tabela intermediária (sale_product)
+            db.execute(sale_product.insert().values(sale_id=new_sale.id, product_id=product.id, quantity=item["quantity"]))
+
+        # Atualiza o total da venda
+        new_sale.total = total
+        db.commit()
+        db.refresh(new_sale)
+
+        return new_sale  # Retorna a venda criada como resposta
+
+    except Exception as e:
+        db.rollback()
+        print(f"Erro interno: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao processar a venda")
